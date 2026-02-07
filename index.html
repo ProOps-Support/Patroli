@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>E-Patrol App</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/html5-qrcode"></script>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        .active-tab { border-bottom: 3px solid #facc15; color: #facc15; }
+        .loader { border: 3px solid #f3f3f3; border-top: 3px solid #1e3a8a; border-radius: 50%; width: 20px; height: 20px; animation: spin 1s linear infinite; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body class="bg-gray-100">
+    <div id="root"></div>
+
+    <script type="text/babel" data-type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+        import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
+        import { getFirestore, collection, doc, setDoc, writeBatch } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+
+        // --- KONFIGURASI HARUS SAMA ---
+        const firebaseConfig = {
+            apiKey: "AIzaSyDbt7DDol8jNbi3HERDBQ0QoKePszS_ziY",
+            authDomain: "guard-d75d6.firebaseapp.com",
+            projectId: "guard-d75d6",
+            storageBucket: "guard-d75d6.firebasestorage.app",
+            messagingSenderId: "610027210849",
+            appId: "1:610027210849:web:cae057a05b36ebccc10220"
+        };
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        const appId = 'dashboard-web-v1';
+
+        function PatrolApp() {
+            const [subTab, setSubTab] = React.useState('patroli');
+            const [officer, setOfficer] = React.useState('');
+            const [location, setLocation] = React.useState('');
+            const [notes, setNotes] = React.useState('');
+            const [photos, setPhotos] = React.useState([]);
+            const [loading, setLoading] = React.useState(false);
+            const [scanning, setScanning] = React.useState(false);
+
+            React.useEffect(() => { signInAnonymously(auth); }, []);
+
+            const startScan = () => {
+                setScanning(true);
+                const scanner = new Html5Qrcode("reader");
+                scanner.start({ facingMode: "environment" }, { fps: 10, qrbox: 250 }, 
+                    (decoded) => { setLocation(decoded); scanner.stop(); setScanning(false); },
+                    () => {}
+                );
+            };
+
+            const handlePhoto = (e) => {
+                if(e.target.files) {
+                    Array.from(e.target.files).forEach(file => {
+                        const reader = new FileReader();
+                        reader.onload = (ev) => {
+                            const img = new Image();
+                            img.src = ev.target.result;
+                            img.onload = () => {
+                                const canvas = document.createElement('canvas');
+                                const ctx = canvas.getContext('2d');
+                                const maxW = 600;
+                                const scale = maxW / img.width;
+                                canvas.width = maxW; canvas.height = img.height * scale;
+                                ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                                setPhotos(p => [...p, canvas.toDataURL('image/jpeg', 0.6)]);
+                            }
+                        };
+                        reader.readAsDataURL(file);
+                    });
+                }
+            };
+
+            const submit = async (e) => {
+                e.preventDefault();
+                setLoading(true);
+                try {
+                    const batch = writeBatch(db);
+                    const collName = subTab === 'insiden' ? 'incidents' : 'patrol_logs';
+                    const ref = doc(collection(db, 'artifacts', appId, 'public', 'data', collName));
+                    
+                    batch.set(ref, {
+                        officer, location, notes, photos, type: subTab,
+                        timestamp: new Date().toISOString(),
+                        date: new Date().toISOString(),
+                        status: subTab === 'insiden' ? 'Investigasi' : 'Patroli'
+                    });
+                    await batch.commit();
+                    alert("Laporan Terkirim!");
+                    setPhotos([]); setNotes(''); setLocation('');
+                } catch(e) { alert("Error: " + e.message); }
+                setLoading(false);
+            };
+
+            return (
+                <div className="flex flex-col items-center min-h-screen pb-20">
+                    <div className="w-full max-w-md bg-blue-900 text-white p-5 rounded-b-3xl shadow-lg mb-4">
+                        <div className="flex justify-between items-center">
+                            <div><h1 className="text-xl font-bold">E-Patrol</h1><p className="text-xs text-blue-200">Mode Petugas</p></div>
+                            <a href="index.html" className="text-xs bg-blue-800 px-2 py-1 rounded">Ke Dashboard</a>
+                        </div>
+                    </div>
+
+                    <div className="w-full max-w-md flex justify-around bg-white mb-4 shadow-sm font-bold text-gray-500">
+                        {['patroli', 'insiden'].map(t => (
+                            <button key={t} onClick={()=>setSubTab(t)} className={`py-4 px-2 flex-1 uppercase ${subTab===t?'active-tab bg-blue-50':''}`}>{t}</button>
+                        ))}
+                    </div>
+
+                    <div className="w-full max-w-md px-4">
+                        <form onSubmit={submit} className="bg-white rounded-2xl shadow-md p-6">
+                            <div className="mb-4">
+                                <label className="block text-xs font-bold mb-1">PETUGAS</label>
+                                <select className="w-full border p-2 rounded" onChange={e=>setOfficer(e.target.value)} required>
+                                    <option value="">Pilih...</option><option>Petugas A</option><option>Petugas B</option>
+                                </select>
+                            </div>
+                            <div className="mb-4">
+                                <label className="block text-xs font-bold mb-1 flex justify-between">
+                                    LOKASI
+                                    <span onClick={startScan} className="text-blue-600 cursor-pointer"><i className="fas fa-qrcode"></i> Scan QR</span>
+                                </label>
+                                {scanning && <div id="reader" className="mb-2"></div>}
+                                <input value={location} onChange={e=>setLocation(e.target.value)} className="w-full border p-2 rounded" required />
+                            </div>
+                            <div className="mb-4">
+                                <label className="block text-xs font-bold mb-1">CATATAN</label>
+                                <textarea value={notes} onChange={e=>setNotes(e.target.value)} className="w-full border p-2 rounded" rows="3"></textarea>
+                            </div>
+                            <div className="mb-6">
+                                <label className="block text-xs font-bold mb-1 text-center">FOTO</label>
+                                <div className="grid grid-cols-3 gap-2">
+                                    <div onClick={()=>document.getElementById('cam').click()} className="aspect-square border-2 border-dashed rounded flex items-center justify-center cursor-pointer"><i className="fas fa-camera text-gray-400"></i></div>
+                                    {photos.map((p,i)=><img key={i} src={p} className="aspect-square object-cover rounded border"/>)}
+                                </div>
+                                <input type="file" id="cam" accept="image/*" capture="environment" className="hidden" onChange={handlePhoto} />
+                            </div>
+                            <button disabled={loading} className="w-full bg-blue-900 text-white py-3 rounded-xl font-bold shadow-lg">
+                                {loading ? 'Mengirim...' : 'KIRIM LAPORAN'}
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            );
+        }
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<PatrolApp />);
+    </script>
+</body>
+</html>
